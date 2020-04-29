@@ -1,16 +1,4 @@
-#prende una directory o un file a riga di comando
-#legge il file riga per riga -> parsing con split in un array[19]
-#controllo l'elemento dove si trova il nome del paese
-
-#strutture dati che mi servono: dictionary con key=country(str) e value=contatore(int)
-
-#ciclo di lettura del file: una sola lista con gli elementi del parsing che ogni volta viene sovrascritta (per evitare l'utilizzo eccessivo di 
-# memoria - non mi serve salvare i dati, mi serve solo vedere come sono distribuiti)
-
-
-#alla fine - plot dei risultati in un semplicissimo grafico?
-
-
+# STATISTICS ON DESTINATION IP COUNTRIES ONLY
 # THIS VERY FIRST VERSION IS WITHOUT ERROR CHECKING OR EXCEPTION HANDLING
 # IT TAKES ONE COMMAND LINE ARGUMENT: A DIRECTORY - THIS WILL BE EXPLORED TO FIND ALL THE FILES INSIDE ANY SUBDIRECTORY TO COLLECT AND INTERPRET THEIR DATA
 
@@ -25,8 +13,7 @@ if len(sys.argv) != 2:
     sys.exit()
 
 
-# create empty dictionary to store countries statistics
-countries = {}
+countries = {}      # dictionary to store countries statistics - {keys=countries(str) : values=counters(int)}
 
 
 # get local ip address 
@@ -54,7 +41,6 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
                 print("no DST_IP_COUNTRY among the fields")
                 sys.exit()
     
-
 
 
             for line in file:
