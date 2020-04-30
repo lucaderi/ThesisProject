@@ -6,17 +6,60 @@
 import sys
 import os
 import socket
+from recordclass import recordclass
 
-#check parameters
+
+# check parameters
 if len(sys.argv) != 2:
     print("Usage: ", sys.argv[0], "directory_name")
     sys.exit()
 
 
-countries = {}      # dictionary to store countries statistics - {keys=countries(str) : values=counters(int)}
+# ---------------- data structures -------------------
+
+Bin = recordclass('Bin', 'min max counter')     #Bin type, used to store and classify integer fields
+
+duration_bins = []          # list to store flow duration statistics
+countries = {}              # dictionary to store countries statistics - {keys=countries(str) : values=counters(int)}
 
 
-# get local ip address 
+
+
+
+# ---------------- support functions -----------------
+def bins_constructor(range_values, number_of_bins, data_structure):
+    for i in range(number_of_bins):
+        if i == number_of_bins - 1:
+            newBin = Bin(min=range_values[i], max=sys.maxsize, counter=0)
+        else:
+            newBin = Bin(min=range_values[i], max=range_values[i+1], counter=0)
+        data_structure.append(newBin)
+
+
+def place_in_bin(data, data_structure, number_of_bins):
+    i=0
+    while i < number_of_bins:
+        if data > data_structure[i].min:
+            if data < data_structure[i].max:
+                data_structure[i].counter += 1
+        i += 1
+
+
+#-------------------- initialize data structures ----------------
+
+
+
+# flow_duration
+range_values_duration=[0, 10, 30, 50, 250, 600, 5000, 20000]
+number_of_duration_bins = len(range_values_duration)
+bins_constructor(range_values_duration, number_of_duration_bins, duration_bins)
+
+
+
+
+
+
+# get local ip address (I MUST CONSIDER ALL THE LOCAL IP ADDRESSES)
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
 s.connect(("8.8.8.8", 80))
 local_ip_address = s.getsockname()[0]
@@ -41,11 +84,23 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
                 print("no DST_IP_COUNTRY among the fields")
                 sys.exit()
     
-
+            if "FLOW_DURATION_MILLISECONDS" in first_line:
+                flow_duration_index = first_line.index("FLOW_DURATION_MILLISECONDS")
+            else:
+                print("no FLOW_DURATION_MILLISECONDS among the fields")
+                sys.exit()
 
             for line in file:
                 #create a list of fields
                 flowFields = line.split("|")
+
+
+
+                # flow duration
+                flow_duration = int(flowFields[flow_duration_index])
+                place_in_bin(flow_duration, duration_bins, number_of_duration_bins)
+
+
 
                 #if source address is not my local ip, ignore the line
                 if flowFields[0] != local_ip_address:
@@ -71,6 +126,7 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
 
 
 print(list(countries.items()))
+print(duration_bins)
 
 
 #
@@ -82,4 +138,6 @@ print(list(countries.items()))
 # plt.bar(range(len(countries)),values,tick_label=names)
 # plt.savefig('dst_countries_stat.png')
 # plt.show()
-         
+
+
+
