@@ -1,4 +1,4 @@
-# STATISTICS ON DESTINATION IP COUNTRIES ONLY
+# STATISTICS ON %FLOW_DURATION_MILLISECONDS %IN_BYTES %OUT_BYTES %L7_PROTO (with a special attention to TLS based protocols) %DST_IP_COUNTRY
 # THIS VERY FIRST VERSION IS WITHOUT ERROR CHECKING OR EXCEPTION HANDLING
 # IT TAKES ONE COMMAND LINE ARGUMENT: A DIRECTORY - THIS WILL BE EXPLORED TO FIND ALL THE FILES INSIDE ANY SUBDIRECTORY TO COLLECT AND INTERPRET THEIR DATA
 
@@ -22,7 +22,9 @@ Bin = recordclass('Bin', 'min max counter')     #Bin type, used to store and cla
 
 duration_bins = []          # list to store flow duration statistics
 inbytes_bins = []           # list to store flow src-to-dst bytes statistics
-outbytes_bins = []          # list to store flow dst-to-stc bytes statistics 
+outbytes_bins = []          # list to store flow dst-to-stc bytes statistics
+l7proto_bins = []           # list to store flow l7 protocol number statistics
+tls_proto_bins = []         # list to store flow l7 protocol-over-TLS number statistics
 countries = {}              # dictionary to store countries statistics - {keys=countries(str) : values=counters(int)}
 
 
@@ -64,13 +66,19 @@ range_values_inbytes=[0, 52, 64, 128, 256, 512, 1024, 4096, 10000]
 number_of_inbytes_bins = len(range_values_inbytes)
 bins_constructor(range_values_inbytes, number_of_inbytes_bins, inbytes_bins)
 
-#out_bytes = outgoing flow bytes (dst->src)
+# out_bytes = outgoing flow bytes (dst->src)
 range_values_outbytes = [0, 52, 64, 128, 256, 512, 1024, 4096, 10000]
 number_of_outbytes_bins = len(range_values_outbytes)
 bins_constructor(range_values_outbytes, number_of_outbytes_bins, outbytes_bins)
 
+# l7 protocol number
+range_values_l7proto = [0, 25, 50, 91, 92, 150]
+number_of_l7proto_bins = len(range_values_l7proto)
+bins_constructor(range_values_l7proto, number_of_l7proto_bins, l7proto_bins)
 
-
+range_values_tls_proto = [0, 50, 100, 125, 150, 200]
+number_of_tls_proto = len(range_values_tls_proto)
+bins_constructor(range_values_tls_proto, number_of_tls_proto, tls_proto_bins)
 
 
 
@@ -111,6 +119,12 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
                 print("no OUT_BYTES among the fields")
                 sys.exit()
 
+            if "L7_PROTO" in first_line:
+                l7proto_index = first_line.index("L7_PROTO")
+            else:
+                print("no L7_PROTO among the fields")
+                sys.exit()
+
             if "DST_IP_COUNTRY" in first_line:
                 dst_ip_country_index = first_line.index("DST_IP_COUNTRY")
             else:
@@ -139,6 +153,17 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
                 place_in_bin(out_bytes, outbytes_bins, number_of_outbytes_bins)
 
 
+                # layer 7 (application) protocol number
+                l7_proto = flowFields[l7proto_index]
+                place_in_bin(int(float(l7_proto)), l7proto_bins, number_of_l7proto_bins)
+                if int(float(l7_proto)) == 91:
+                    if "." in l7_proto:
+                        proto_number = int(l7_proto.split(".")[1])
+                    else:
+                        proto_number = 0
+                    place_in_bin(proto_number, tls_proto_bins, number_of_tls_proto)
+
+
                 # dst ip country
                 # if source address is not my local ip, ignore the line
                 if flowFields[0] != local_ip_address:
@@ -151,7 +176,6 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
                     if dst_ip_country == '':
                         dst_ip_country = 'Unknown'
 
-                    #print(dst_ip_country)
 
                     #count how many times a certain destination country was encountered in flows
                     if dst_ip_country not in countries:
@@ -166,6 +190,8 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
 print("FLOW_DURATION\n", duration_bins)
 print("IN_BYTES\n", inbytes_bins)
 print("OUT_BYTES\n", outbytes_bins)
+print("L7_PROTO\n", l7proto_bins)
+print("TLS-BASED PROTOCOL NUMBER\n", tls_proto_bins)
 
 orderedCountries = collections.OrderedDict(sorted(countries.items()))
 print("DST_IP_COUNTRY\n", list(orderedCountries.items()))
