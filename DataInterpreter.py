@@ -6,6 +6,7 @@
 import sys
 import os
 import socket
+import collections
 from recordclass import recordclass
 
 
@@ -20,6 +21,8 @@ if len(sys.argv) != 2:
 Bin = recordclass('Bin', 'min max counter')     #Bin type, used to store and classify integer fields
 
 duration_bins = []          # list to store flow duration statistics
+inbytes_bins = []           # list to store flow src-to-dst bytes statistics
+outbytes_bins = []          # list to store flow dst-to-stc bytes statistics 
 countries = {}              # dictionary to store countries statistics - {keys=countries(str) : values=counters(int)}
 
 
@@ -39,11 +42,13 @@ def bins_constructor(range_values, number_of_bins, data_structure):
 def place_in_bin(data, data_structure, number_of_bins):
     i=0
     while i < number_of_bins:
-        if data > data_structure[i].min:
+        if data >= data_structure[i].min:
             if data < data_structure[i].max:
                 data_structure[i].counter += 1
         i += 1
 
+def print_bins(bins):
+    pass
 
 #-------------------- initialize data structures ----------------
 
@@ -53,6 +58,16 @@ def place_in_bin(data, data_structure, number_of_bins):
 range_values_duration=[0, 10, 30, 50, 250, 600, 5000, 20000]
 number_of_duration_bins = len(range_values_duration)
 bins_constructor(range_values_duration, number_of_duration_bins, duration_bins)
+
+# in_bytes = incoming flow bytes (src->dst)
+range_values_inbytes=[0, 52, 64, 128, 256, 512, 1024, 4096, 10000]
+number_of_inbytes_bins = len(range_values_inbytes)
+bins_constructor(range_values_inbytes, number_of_inbytes_bins, inbytes_bins)
+
+#out_bytes = outgoing flow bytes (dst->src)
+range_values_outbytes = [0, 52, 64, 128, 256, 512, 1024, 4096, 10000]
+number_of_outbytes_bins = len(range_values_outbytes)
+bins_constructor(range_values_outbytes, number_of_outbytes_bins, outbytes_bins)
 
 
 
@@ -78,17 +93,31 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
 
             first_line = file.readline().split("|")
 
+            if "FLOW_DURATION_MILLISECONDS" in first_line:
+                flow_duration_index = first_line.index("FLOW_DURATION_MILLISECONDS")
+            else:
+                print("no FLOW_DURATION_MILLISECONDS among the fields")
+                sys.exit()
+
+            if "IN_BYTES" in first_line:
+                inbytes_index = first_line.index("IN_BYTES")
+            else:
+                print("no IN_BYTES among the fields")
+                sys.exit()
+            
+            if "OUT_BYTES" in first_line:
+                outbytes_index = first_line.index("OUT_BYTES")
+            else:
+                print("no OUT_BYTES among the fields")
+                sys.exit()
+
             if "DST_IP_COUNTRY" in first_line:
                 dst_ip_country_index = first_line.index("DST_IP_COUNTRY")
             else:
                 print("no DST_IP_COUNTRY among the fields")
                 sys.exit()
     
-            if "FLOW_DURATION_MILLISECONDS" in first_line:
-                flow_duration_index = first_line.index("FLOW_DURATION_MILLISECONDS")
-            else:
-                print("no FLOW_DURATION_MILLISECONDS among the fields")
-                sys.exit()
+            
 
             for line in file:
                 #create a list of fields
@@ -101,8 +130,17 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
                 place_in_bin(flow_duration, duration_bins, number_of_duration_bins)
 
 
+                # src to dst bytes
+                in_bytes = int(flowFields[inbytes_index])
+                place_in_bin(in_bytes, inbytes_bins, number_of_inbytes_bins)
 
-                #if source address is not my local ip, ignore the line
+                # dst to src bytes
+                out_bytes = int(flowFields[outbytes_index])
+                place_in_bin(out_bytes, outbytes_bins, number_of_outbytes_bins)
+
+
+                # dst ip country
+                # if source address is not my local ip, ignore the line
                 if flowFields[0] != local_ip_address:
                     continue
 
@@ -125,19 +163,22 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
 
 
 
-print(list(countries.items()))
-print(duration_bins)
+print("FLOW_DURATION\n", duration_bins)
+print("IN_BYTES\n", inbytes_bins)
+print("OUT_BYTES\n", outbytes_bins)
 
+orderedCountries = collections.OrderedDict(sorted(countries.items()))
+print("DST_IP_COUNTRY\n", list(orderedCountries.items()))
 
 #
 # *************************** if you'd like to plot it******************************
-# import matplotlib.pyplot as plt
-# names = list(countries.keys())
-# values = list(countries.values())
+#import matplotlib.pyplot as plt
+#names = list(orderedCountries.keys())
+#values = list(orderedCountries.values())
 
-# plt.bar(range(len(countries)),values,tick_label=names)
-# plt.savefig('dst_countries_stat.png')
-# plt.show()
+#plt.bar(range(len(orderedCountries)),values,tick_label=names)
+#plt.savefig('dst_countries_stat_29.png')
+#plt.show()
 
 
 
