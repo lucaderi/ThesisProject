@@ -50,7 +50,16 @@ def place_in_bin(data, data_structure, number_of_bins):
         i += 1
 
 def print_bins(bins):
-    pass
+    print()
+
+    for i in range(len(bins) - 1):
+        r = "[" + str(bins[i].min) + "-" + str(bins[i].max) + "]"
+        print(f"{r:<13}||{str(bins[i].counter):>7}")
+    lastrange = "[ >= " + str(bins[len(bins)-1].min) + " ]"
+    print(f"{lastrange:<13}||{str(bins[len(bins)-1].counter):>7}")
+
+    print()
+
 
 #-------------------- initialize data structures ----------------
 
@@ -187,11 +196,16 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
 
 
 
-print("FLOW_DURATION\n", duration_bins)
-print("IN_BYTES\n", inbytes_bins)
-print("OUT_BYTES\n", outbytes_bins)
-print("L7_PROTO\n", l7proto_bins)
-print("TLS-BASED PROTOCOL NUMBER\n", tls_proto_bins)
+print("FLOW_DURATION")
+print_bins(duration_bins)
+print("IN_BYTES")
+print_bins(inbytes_bins)
+print("OUT_BYTES")
+print_bins(outbytes_bins)
+print("L7_PROTO")
+print_bins(l7proto_bins)
+print("TLS-BASED PROTOCOL NUMBER")
+print_bins(tls_proto_bins)
 
 orderedCountries = collections.OrderedDict(sorted(countries.items()))
 print("DST_IP_COUNTRY\n", list(orderedCountries.items()))
