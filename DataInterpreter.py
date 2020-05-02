@@ -9,13 +9,14 @@
 # 3-fix it for all device ip addresses 
 # 4-consider src and dst ip when needed 
 # 5-add exception handling and error checking
-# 6-make it work for data od specific directories in the tree
+# 6-make it work for data of specific directories in the tree
 
 import sys
 import os
 import socket
 import collections
 from recordclass import recordclass
+from netifaces import interfaces, ifaddresses, AF_INET
 
 
 # check parameters
@@ -34,12 +35,21 @@ outbytes_bins = []          # list to store flow dst-to-stc bytes statistics
 l7proto_bins = []           # list to store flow l7 protocol number statistics
 tls_proto_bins = []         # list to store flow l7 protocol-over-TLS number statistics
 countries = {}              # dictionary to store countries statistics - {keys=countries(str) : values=counters(int)}
-dns_query_hashes_bins = []  # store to store dns queries' hashes statistics
+dns_query_hashes_bins = []  # list to store dns queries' hashes statistics
 
 
 
 
 # ---------------- support functions -----------------
+def ip4_addresses():
+    ip_list = []
+    for inter in interfaces():
+        if AF_INET in ifaddresses(inter):
+            for link in ifaddresses(inter)[AF_INET]:
+                ip_list.append(link['addr'])
+    return ip_list
+
+
 def bins_constructor(range_values, number_of_bins, data_structure):
     for i in range(number_of_bins):
         if i == number_of_bins - 1:
@@ -116,11 +126,18 @@ bins_constructor(range_values_dns_query, number_of_dns_query_bins, dns_query_has
 
 
 # get local ip address (I MUST CONSIDER ALL THE LOCAL IP ADDRESSES)
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
-s.connect(("8.8.8.8", 80))
-local_ip_address = s.getsockname()[0]
-s.close()
-print(local_ip_address)
+# s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
+# s.connect(("8.8.8.8", 80))
+# local_ip_address = s.getsockname()[0]
+# s.close()
+# print(local_ip_address)
+
+
+# get all local AF_INET ip addresses
+interf = interfaces()
+print(interf)
+local_ips = ip4_addresses()
+print(local_ips)
 
 
 
@@ -210,8 +227,8 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
 
 
                 # dst ip country
-                # if source address is not my local ip, ignore the line
-                if flowFields[0] != local_ip_address:
+                # if source address is not one of my local ip addresses, ignore the line
+                if flowFields[0] not in local_ips:
                     continue
 
                 else:
