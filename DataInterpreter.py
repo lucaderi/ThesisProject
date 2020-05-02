@@ -3,6 +3,14 @@
 # IT TAKES ONE COMMAND LINE ARGUMENT: A DIRECTORY - THIS WILL BE EXPLORED TO FIND ALL THE FILES INSIDE ANY SUBDIRECTORY TO COLLECT AND INTERPRET THEIR DATA
 
 
+#next tasks: 
+# 1-add dns query name 
+# 2-sort out dst_ip_country 
+# 3-fix it for all device ip addresses 
+# 4-consider src and dst ip when needed 
+# 5-add exception handling and error checking
+# 6-make it work for data od specific directories in the tree
+
 import sys
 import os
 import socket
@@ -26,6 +34,7 @@ outbytes_bins = []          # list to store flow dst-to-stc bytes statistics
 l7proto_bins = []           # list to store flow l7 protocol number statistics
 tls_proto_bins = []         # list to store flow l7 protocol-over-TLS number statistics
 countries = {}              # dictionary to store countries statistics - {keys=countries(str) : values=counters(int)}
+dns_query_hashes = {}       # dictionary to store dns queries' hashes statisctics - {keys=hash(str) : values=counters(int)}
 
 
 
@@ -109,6 +118,10 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
             #get index of destination ip country field (from first line)
 
             first_line = file.readline().split("|")
+            
+            # remove \n from last list element
+            first_line[-1] = first_line[-1].replace('\n', '')
+            
 
             if "FLOW_DURATION_MILLISECONDS" in first_line:
                 flow_duration_index = first_line.index("FLOW_DURATION_MILLISECONDS")
@@ -139,6 +152,12 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
             else:
                 print("no DST_IP_COUNTRY among the fields")
                 sys.exit()
+            
+            if "DNS_QUERY" in first_line:
+                dns_query_index = first_line.index("DNS_QUERY")
+            else:
+                print("no DNS_QUERY among the fields")
+                sys.exit()
     
             
 
@@ -146,6 +165,8 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
                 #create a list of fields
                 flowFields = line.split("|")
 
+                # remove \n from last list element
+                flowFields[-1] = flowFields[-1].replace('\n', '')
 
 
                 # flow duration
@@ -192,7 +213,25 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
                     else:
                         countries[dst_ip_country] += 1
 
-
+                #dns query name (last 2 domains)
+                dns_query = flowFields[dns_query_index]
+                if dns_query == '':
+                    dns_query = 'Unknown'
+                    #meglio ignorarle proprio?
+                else:
+                    dns_query = dns_query.split(".")
+                    print(dns_query)
+                    if len(dns_query) > 1:
+                        dns_query = dns_query[-2] + "." + dns_query[-1]
+                    else:
+                        dns_query = dns_query[0]
+                    
+                    dns_query = str(hash(dns_query))
+                if dns_query not in dns_query_hashes:
+                    dns_query_hashes.update({dns_query:1})
+                else:
+                    dns_query_hashes[dns_query] += 1
+                
 
 
 
@@ -209,6 +248,9 @@ print_bins(tls_proto_bins)
 
 orderedCountries = collections.OrderedDict(sorted(countries.items()))
 print("DST_IP_COUNTRY\n", list(orderedCountries.items()))
+
+print("DNS_QUERY")
+print(list(dns_query_hashes.items()))
 
 #
 # *************************** if you'd like to plot it******************************
