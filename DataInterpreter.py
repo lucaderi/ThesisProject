@@ -4,7 +4,7 @@
 
 
 #next tasks: 
-# 1-add dns query name 
+# 1-add dns query name (X)
 # 2-sort out dst_ip_country 
 # 3-fix it for all device ip addresses 
 # 4-consider src and dst ip when needed 
@@ -34,8 +34,7 @@ outbytes_bins = []          # list to store flow dst-to-stc bytes statistics
 l7proto_bins = []           # list to store flow l7 protocol number statistics
 tls_proto_bins = []         # list to store flow l7 protocol-over-TLS number statistics
 countries = {}              # dictionary to store countries statistics - {keys=countries(str) : values=counters(int)}
-dns_query_hashes = {}       # dictionary to store dns queries' hashes statisctics - {keys=hash(str) : values=counters(int)}
-
+dns_query_hashes_bins = []  # store to store dns queries' hashes statistics
 
 
 
@@ -69,6 +68,18 @@ def print_bins(bins):
 
     print()
 
+def create_compressed_hash(name):
+    domains = name.split(".")             
+    if len(domains) > 1:
+        domain = domains[-2] + "." + domains[-1]
+    else:
+        domain = domains[0]             
+    domain = abs(hash(domain))
+    compressed_hash = int(domain/(10 ** (len(str(domain)) - 3)))
+
+    return compressed_hash
+
+
 
 #-------------------- initialize data structures ----------------
 
@@ -97,6 +108,10 @@ bins_constructor(range_values_l7proto, number_of_l7proto_bins, l7proto_bins)
 range_values_tls_proto = [0, 50, 100, 125, 150, 200]
 number_of_tls_proto = len(range_values_tls_proto)
 bins_constructor(range_values_tls_proto, number_of_tls_proto, tls_proto_bins)
+
+range_values_dns_query = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+number_of_dns_query_bins = len(range_values_dns_query)
+bins_constructor(range_values_dns_query, number_of_dns_query_bins, dns_query_hashes_bins)
 
 
 
@@ -215,22 +230,15 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
 
                 #dns query name (last 2 domains)
                 dns_query = flowFields[dns_query_index]
+
                 if dns_query == '':
-                    dns_query = 'Unknown'
-                    #meglio ignorarle proprio?
+                    #dns_query = 'Unknown'
+                    #meglio ignorarle proprio? Sono moltissime quindi suppongo di si
+                    continue
                 else:
-                    dns_query = dns_query.split(".")
-                    print(dns_query)
-                    if len(dns_query) > 1:
-                        dns_query = dns_query[-2] + "." + dns_query[-1]
-                    else:
-                        dns_query = dns_query[0]
-                    
-                    dns_query = str(hash(dns_query))
-                if dns_query not in dns_query_hashes:
-                    dns_query_hashes.update({dns_query:1})
-                else:
-                    dns_query_hashes[dns_query] += 1
+                    dns_query_hash = create_compressed_hash(dns_query)
+                
+                place_in_bin(dns_query_hash, dns_query_hashes_bins, number_of_dns_query_bins)
                 
 
 
@@ -250,7 +258,7 @@ orderedCountries = collections.OrderedDict(sorted(countries.items()))
 print("DST_IP_COUNTRY\n", list(orderedCountries.items()))
 
 print("DNS_QUERY")
-print(list(dns_query_hashes.items()))
+print_bins(dns_query_hashes_bins)
 
 #
 # *************************** if you'd like to plot it******************************
