@@ -1,4 +1,4 @@
-# STATISTICS ON %FLOW_DURATION_MILLISECONDS %IN_BYTES %OUT_BYTES %L7_PROTO (with a special attention to TLS based protocols) %DST_IP_COUNTRY
+# STATISTICS ON %FLOW_DURATION_MILLISECONDS %IN_BYTES %OUT_BYTES %L7_PROTO (with a special attention to TLS based protocols) %DST_IP_COUNTRY %DNS_QUERY
 # THIS VERY FIRST VERSION IS WITHOUT ERROR CHECKING OR EXCEPTION HANDLING
 # IT TAKES ONE COMMAND LINE ARGUMENT: A DIRECTORY - THIS WILL BE EXPLORED TO FIND ALL THE FILES INSIDE ANY SUBDIRECTORY TO COLLECT AND INTERPRET THEIR DATA
 
@@ -6,7 +6,7 @@
 #next tasks: 
 # 1-add dns query name (X)
 # 2-sort out dst_ip_country 
-# 3-fix it for all device ip addresses 
+# 3-fix it for all device ip addresses (X)
 # 4-consider src and dst ip when needed 
 # 5-add exception handling and error checking
 # 6-make it work for data of specific directories in the tree
@@ -144,6 +144,8 @@ print(local_ips)
 
 # walk the given directory and process data of files found
 for dirpath, dirnames, files in os.walk(sys.argv[1]):
+    print(dirnames)
+    print(files)
     for file_name in files:
         with open(os.path.join(dirpath,file_name), 'r') as file:
 
@@ -153,6 +155,12 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
             
             # remove \n from last list element
             first_line[-1] = first_line[-1].replace('\n', '')
+
+            if "IPV4_SRC_ADDR" in first_line:
+                src_addr_index = first_line.index("IPV4_SRC_ADDR")
+            else:
+                print("no IPV4_SRC_ADDR among the fields")
+                sys.exit()
             
 
             if "FLOW_DURATION_MILLISECONDS" in first_line:
@@ -228,7 +236,7 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
 
                 # dst ip country
                 # if source address is not one of my local ip addresses, ignore the line
-                if flowFields[0] not in local_ips:
+                if flowFields[src_addr_index] not in local_ips:
                     continue
 
                 else:
