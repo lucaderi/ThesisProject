@@ -144,8 +144,9 @@ print(local_ips)
 
 # walk the given directory and process data of files found
 for dirpath, dirnames, files in os.walk(sys.argv[1]):
-    print(dirnames)
-    print(files)
+    dirnames.sort()
+    files.sort()
+
     for file_name in files:
         with open(os.path.join(dirpath,file_name), 'r') as file:
 
@@ -160,6 +161,12 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
                 src_addr_index = first_line.index("IPV4_SRC_ADDR")
             else:
                 print("no IPV4_SRC_ADDR among the fields")
+                sys.exit()
+
+            if "IPV4_DST_ADDR" in first_line:
+                dst_addr_index = first_line.index("IPV4_DST_ADDR")
+            else:
+                print("no IPV4_DST_ADDR among the fields")
                 sys.exit()
             
 
@@ -207,6 +214,10 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
 
                 # remove \n from last list element
                 flowFields[-1] = flowFields[-1].replace('\n', '')
+
+                # ignore flows that don't have one of my ip addresses as source or destination
+                if (flowFields[src_addr_index] not in local_ips) and (flowFields[dst_addr_index] not in local_ips):
+                    continue
 
 
                 # flow duration
@@ -286,7 +297,7 @@ print("DNS_QUERY")
 print_bins(dns_query_hashes_bins)
 
 #
-# *************************** if you'd like to plot it******************************
+# *************************** if you'd like to plot countries bar graph*******************************
 #import matplotlib.pyplot as plt
 #names = list(orderedCountries.keys())
 #values = list(orderedCountries.values())
