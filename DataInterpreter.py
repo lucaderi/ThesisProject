@@ -1,15 +1,5 @@
-# STATISTICS ON %FLOW_DURATION_MILLISECONDS %IN_BYTES %OUT_BYTES %L7_PROTO (with a special attention to TLS based protocols) %DST_IP_COUNTRY %DNS_QUERY
-# THIS VERY FIRST VERSION IS WITHOUT ERROR CHECKING OR EXCEPTION HANDLING
+
 # IT TAKES ONE COMMAND LINE ARGUMENT: A DIRECTORY - THIS WILL BE EXPLORED TO FIND ALL THE FILES INSIDE ANY SUBDIRECTORY TO COLLECT AND INTERPRET THEIR DATA
-
-
-#next tasks: 
-# 1-add dns query name (X)
-# 2-sort out dst_ip_country 
-# 3-fix it for all device ip addresses (X)
-# 4-consider src and dst ip when needed 
-# 5-add exception handling and error checking
-# 6-make it work for data of specific directories in the tree
 
 import sys
 import os
@@ -17,6 +7,9 @@ import socket
 import collections
 from recordclass import recordclass
 from netifaces import interfaces, ifaddresses, AF_INET
+import ipaddress
+import radix
+import csv
 
 
 # check parameters
@@ -27,29 +20,42 @@ if len(sys.argv) != 2:
 
 # ---------------- data structures -------------------
 
+rtree = radix.Radix()       # radix tree for ip lookup
+local_IPs = {}              # dictionary to store separate ip's traffic statistics - {key=ip_address(str) : value=l7_protocols(dict)}
+l7_protocols = {}           # dictionary to store separate l7 protocols statistics - {key=l7_proto_name(str) : value=indicators(dict)}
+indicators = {}             # dictionary to store separate indicators bins - {key=indicator(str) : value=bins(list of Bin objects)}
+
+
 Bin = recordclass('Bin', 'min max counter')     #Bin type, used to store and classify integer fields
 
-duration_bins = []          # list to store flow duration statistics
-inbytes_bins = []           # list to store flow src-to-dst bytes statistics
-outbytes_bins = []          # list to store flow dst-to-stc bytes statistics
-l7proto_bins = []           # list to store flow l7 protocol number statistics
-tls_proto_bins = []         # list to store flow l7 protocol-over-TLS number statistics
-countries = {}              # dictionary to store countries statistics - {keys=countries(str) : values=counters(int)}
-dns_query_hashes_bins = []  # list to store dns queries' hashes statistics
+duration_bins = []          # list to store flow duration bins statistics (one per protocol)
+sentbytes_bins = []         # list to store flow bytes sent by local ip bins statistics (one per l7 protocol)
+receivedbytes_bins = []     # list to store flow bytes received by local ip bins statistics (one per l7 protocol)
+countries = {}              # dictionary to store countries bins statistics - {key=country(str) : value=counter(int)}
+
 
 
 
 
 # ---------------- support functions -----------------
-def ip4_addresses():
-    ip_list = []
+
+# returns a list of ipaddress.IPv4Network objects in cidr notation
+def ip4_networks():
+    ip_networks = []
     for inter in interfaces():
         if AF_INET in ifaddresses(inter):
             for link in ifaddresses(inter)[AF_INET]:
-                ip_list.append(link['addr'])
-    return ip_list
+                # ignore loopback address
+                if link['addr'].startswith('127.'):
+                    continue
+                # extract network address
+                ip_subnet = ipaddress.ip_network(link['addr'] + "/" + link['netmask'], strict = False)
+                ip_networks.append(ip_subnet)
+                
+    return ip_networks
 
 
+# initialize data_structure as a list of Bin objects
 def bins_constructor(range_values, number_of_bins, data_structure):
     for i in range(number_of_bins):
         if i == number_of_bins - 1:
@@ -58,13 +64,14 @@ def bins_constructor(range_values, number_of_bins, data_structure):
             newBin = Bin(min=range_values[i], max=range_values[i+1], counter=0)
         data_structure.append(newBin)
 
-
-def place_in_bin(data, data_structure, number_of_bins):
+# analyze data and increment the right Bin counter
+def place_in_bin(data, bins_list):
     i=0
-    while i < number_of_bins:
-        if data >= data_structure[i].min:
-            if data < data_structure[i].max:
-                data_structure[i].counter += 1
+    while i < len(bins_list):
+        if data >= bins_list[i].min:
+            if data < bins_list[i].max:
+                bins_list[i].counter += 1
+                return
         i += 1
 
 def print_bins(bins):
@@ -76,71 +83,53 @@ def print_bins(bins):
     lastrange = "[ >= " + str(bins[len(bins)-1].min) + " ]"
     print(f"{lastrange:<13}||{str(bins[len(bins)-1].counter):>7}")
 
-    print()
-
-def create_compressed_hash(name):
-    domains = name.split(".")             
-    if len(domains) > 1:
-        domain = domains[-2] + "." + domains[-1]
-    else:
-        domain = domains[0]             
-    domain = abs(hash(domain))
-    compressed_hash = int(domain/(10 ** (len(str(domain)) - 3)))
-
-    return compressed_hash
+    print()   
 
 
 
-#-------------------- initialize data structures ----------------
 
 
 
-# flow_duration
-range_values_duration=[0, 10, 30, 50, 250, 600, 5000, 20000]
-number_of_duration_bins = len(range_values_duration)
-bins_constructor(range_values_duration, number_of_duration_bins, duration_bins)
+#-------------------- initialize indicators dictionary ----------------
 
-# in_bytes = incoming flow bytes (src->dst)
-range_values_inbytes=[0, 52, 64, 128, 256, 512, 1024, 4096, 10000]
-number_of_inbytes_bins = len(range_values_inbytes)
-bins_constructor(range_values_inbytes, number_of_inbytes_bins, inbytes_bins)
+# creates a dictionary with {key=indicator : value=bins(list)} where indicator = {flow_duration, sent_bytes, received_bytes}
+def initialize_indicators_dictionary():
 
-# out_bytes = outgoing flow bytes (dst->src)
-range_values_outbytes = [0, 52, 64, 128, 256, 512, 1024, 4096, 10000]
-number_of_outbytes_bins = len(range_values_outbytes)
-bins_constructor(range_values_outbytes, number_of_outbytes_bins, outbytes_bins)
+    ind_dict = {}
 
-# l7 protocol number
-range_values_l7proto = [0, 25, 50, 91, 92, 150]
-number_of_l7proto_bins = len(range_values_l7proto)
-bins_constructor(range_values_l7proto, number_of_l7proto_bins, l7proto_bins)
+    # create list to store bins
+    duration_bins = []          # flow_duration (ms)
+    sentbytes_bins = []         # bytes sent by local ip
+    receivedbytes_bins = []     # bytes received by local ip
 
-range_values_tls_proto = [0, 50, 100, 125, 150, 200]
-number_of_tls_proto = len(range_values_tls_proto)
-bins_constructor(range_values_tls_proto, number_of_tls_proto, tls_proto_bins)
+    # set ranges values
+    range_values_duration=[0, 30, 60, 300, 600, 1800, 6000, 18000]
+    range_values_sentbytes=[0, 52, 64, 128, 256, 512, 1024, 4096, 10000]
+    range_values_receivedbytes = [0, 52, 64, 128, 256, 512, 1024, 4096, 10000]
 
-range_values_dns_query = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
-number_of_dns_query_bins = len(range_values_dns_query)
-bins_constructor(range_values_dns_query, number_of_dns_query_bins, dns_query_hashes_bins)
+    # construct list of empty bins with given ranges for every indicator
+    bins_constructor(range_values_duration, len(range_values_duration), duration_bins)
+    bins_constructor(range_values_sentbytes, len(range_values_sentbytes), sentbytes_bins)
+    bins_constructor(range_values_receivedbytes, len(range_values_receivedbytes), receivedbytes_bins)
 
+    # add indicator and respective bin list to the dictionary
+    ind_dict.update({'flow_duration' : duration_bins})    
+    ind_dict.update({'sent_bytes' : sentbytes_bins})    
+    ind_dict.update({'received_bytes' : receivedbytes_bins})
 
-
-# get local ip address (I MUST CONSIDER ALL THE LOCAL IP ADDRESSES)
-# s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
-# s.connect(("8.8.8.8", 80))
-# local_ip_address = s.getsockname()[0]
-# s.close()
-# print(local_ip_address)
-
-
-# get all local AF_INET ip addresses
-interf = interfaces()
-print(interf)
-local_ips = ip4_addresses()
-print(local_ips)
+    return ind_dict
 
 
 
+# get all local AF_INET ip networks (cidr notation)
+local_netw = ip4_networks()
+
+# create radix tree
+for net in local_netw:
+    rtree.add(str(net))
+
+
+# --------------------------- computation -------------------------------
 
 # walk the given directory and process data of files found
 for dirpath, dirnames, files in os.walk(sys.argv[1]):
@@ -149,8 +138,6 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
 
     for file_name in files:
         with open(os.path.join(dirpath,file_name), 'r') as file:
-
-            #get index of destination ip country field (from first line)
 
             first_line = file.readline().split("|")
             
@@ -200,13 +187,6 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
                 print("no DST_IP_COUNTRY among the fields")
                 sys.exit()
             
-            if "DNS_QUERY" in first_line:
-                dns_query_index = first_line.index("DNS_QUERY")
-            else:
-                print("no DNS_QUERY among the fields")
-                sys.exit()
-    
-            
 
             for line in file:
                 #create a list of fields
@@ -215,96 +195,71 @@ for dirpath, dirnames, files in os.walk(sys.argv[1]):
                 # remove \n from last list element
                 flowFields[-1] = flowFields[-1].replace('\n', '')
 
-                # ignore flows that don't have one of my ip addresses as source or destination
-                if (flowFields[src_addr_index] not in local_ips) and (flowFields[dst_addr_index] not in local_ips):
-                    continue
-
+                # src and dst ip address
+                src_ip = flowFields[src_addr_index]
+                dst_ip = flowFields[dst_addr_index]
 
                 # flow duration
                 flow_duration = int(flowFields[flow_duration_index])
-                place_in_bin(flow_duration, duration_bins, number_of_duration_bins)
-
 
                 # src to dst bytes
                 in_bytes = int(flowFields[inbytes_index])
-                place_in_bin(in_bytes, inbytes_bins, number_of_inbytes_bins)
 
-                # dst to src bytes
+                # dst to src bytes 
                 out_bytes = int(flowFields[outbytes_index])
-                place_in_bin(out_bytes, outbytes_bins, number_of_outbytes_bins)
 
 
-                # layer 7 (application) protocol number
-                l7_proto = flowFields[l7proto_index]
-                place_in_bin(int(float(l7_proto)), l7proto_bins, number_of_l7proto_bins)
-                if int(float(l7_proto)) == 91:
-                    if "." in l7_proto:
-                        proto_number = int(l7_proto.split(".")[1])
-                    else:
-                        proto_number = 0
-                    place_in_bin(proto_number, tls_proto_bins, number_of_tls_proto)
-
-
-                # dst ip country
-                # if source address is not one of my local ip addresses, ignore the line
-                if flowFields[src_addr_index] not in local_ips:
-                    continue
-
-                else:
-                    #fetch destination ip country
-                    dst_ip_country = flowFields[dst_ip_country_index]
-
-                    if dst_ip_country == '':
-                        dst_ip_country = 'Unknown'
-
-
-                    #count how many times a certain destination country was encountered in flows
-                    if dst_ip_country not in countries:
-                        countries.update({dst_ip_country:1})
-                    else:
-                        countries[dst_ip_country] += 1
-
-                #dns query name (last 2 domains)
-                dns_query = flowFields[dns_query_index]
-
-                if dns_query == '':
-                    #dns_query = 'Unknown'
-                    #meglio ignorarle proprio? Sono moltissime quindi suppongo di si
-                    continue
-                else:
-                    dns_query_hash = create_compressed_hash(dns_query)
+                # l7 protocol
+                l7proto = flowFields[l7proto_index]
                 
-                place_in_bin(dns_query_hash, dns_query_hashes_bins, number_of_dns_query_bins)
-                
+                if rtree.search_best(src_ip):
+                    if src_ip not in local_IPs:
+                        local_IPs.update({src_ip : {}})
+                        
+                    if l7proto not in list(local_IPs[src_ip].keys()):
+                        indicators = initialize_indicators_dictionary()
+                        local_IPs[src_ip].update({l7proto : indicators})
+                        
+                    place_in_bin(flow_duration, local_IPs[src_ip][l7proto]['flow_duration'])
+                    place_in_bin(in_bytes, local_IPs[src_ip][l7proto]['sent_bytes'])
+                    place_in_bin(out_bytes, local_IPs[src_ip][l7proto]['received_bytes'])
+
+                if rtree.search_best(dst_ip):
+                    if dst_ip not in local_IPs:
+                        local_IPs.update({dst_ip : {}})
+                        
+                    if l7proto not in list(local_IPs[dst_ip].keys()):
+                        indicators = initialize_indicators_dictionary()
+                        #initialize_indicators_dictionary(indicators)
+                        local_IPs[dst_ip].update({l7proto : indicators})
+                        
+                    place_in_bin(flow_duration, local_IPs[dst_ip][l7proto]['flow_duration'])
+                    place_in_bin(out_bytes, local_IPs[dst_ip][l7proto]['sent_bytes'])
+                    place_in_bin(in_bytes, local_IPs[dst_ip][l7proto]['received_bytes'])
+                    
 
 
 
-print("FLOW_DURATION")
-print_bins(duration_bins)
-print("IN_BYTES")
-print_bins(inbytes_bins)
-print("OUT_BYTES")
-print_bins(outbytes_bins)
-print("L7_PROTO")
-print_bins(l7proto_bins)
-print("TLS-BASED PROTOCOL NUMBER")
-print_bins(tls_proto_bins)
+# create csv file
+with open('prova.csv', 'w', newline='') as csvfile:
+    fieldnames = ['ip_address', 'l7proto', 'indicator','bin', 'counter']
+    writer = csv.writer(csvfile)
 
-orderedCountries = collections.OrderedDict(sorted(countries.items()))
-print("DST_IP_COUNTRY\n", list(orderedCountries.items()))
+    writer.writerow(fieldnames)
 
-print("DNS_QUERY")
-print_bins(dns_query_hashes_bins)
+    for ip in local_IPs:
+        for proto in local_IPs[ip]:
+            for ind in local_IPs[ip][proto]:
+                bins = local_IPs[ip][proto][ind]
+                for b in range(len(bins)):
+                    min_value = local_IPs[ip][proto][ind][b].min
+                    max_value = local_IPs[ip][proto][ind][b].max
+                    minmaxrange = "[" + str(min_value) + "-" + str(max_value) + "]"
+                    count = local_IPs[ip][proto][ind][b].counter
+                    #binlist.append(minmaxrange)
+                    writer.writerow([ip, proto, ind, minmaxrange, count])
+    
 
-#
-# *************************** if you'd like to plot countries bar graph*******************************
-#import matplotlib.pyplot as plt
-#names = list(orderedCountries.keys())
-#values = list(orderedCountries.values())
-
-#plt.bar(range(len(orderedCountries)),values,tick_label=names)
-#plt.savefig('dst_countries_stat_29.png')
-#plt.show()
 
 
 
