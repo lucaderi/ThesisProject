@@ -103,7 +103,7 @@ def initialize_indicators_dictionary():
     receivedbytes_bins = []     # bytes received by local ip
 
     # set ranges values
-    range_values_duration=[0, 30, 60, 300, 600, 1800, 6000, 18000]
+    range_values_duration=[0, 30000, 60000, 300000, 600000, 1800000, 3600000, 10800000] #30 sec, 1 min, 5 min, 10 min, 30 min, 1h, 3h
     range_values_sentbytes=[0, 52, 64, 128, 256, 512, 1024, 4096, 10000]
     range_values_receivedbytes = [0, 52, 64, 128, 256, 512, 1024, 4096, 10000]
 
@@ -259,7 +259,5 @@ with open('prova.csv', 'w', newline='') as csvfile:
                     #binlist.append(minmaxrange)
                     writer.writerow([ip, proto, ind, minmaxrange, count])
     
-
-
 
 
