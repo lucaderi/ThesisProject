@@ -10,12 +10,11 @@ Python modules required to run the program:
 * netifaces
 * ipaddress
 * py-radix
-* csv
 
 To install a module using pip, just run:
 
 ```
-pip install modulename
+pip3 install modulename
 ```
 
 The program works on textfiles generated from nProbe, which have a special format.
